@@ -111,7 +111,7 @@ This intricate, multi-layered architecture is what allows Uniswap v3 to provide 
 
 
 
-#### How fees_earning in range is calculated
+## How fees_earning in range is calculated
 
 The State at a Tick
 
