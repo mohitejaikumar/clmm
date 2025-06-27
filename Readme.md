@@ -108,3 +108,111 @@ This is incredibly efficient. The contract doesn't track your fees in real-time.
 6.  **Transfer Tokens:** The contract calculates the exact amount of ETH and USDC you need to deposit based on your liquidity amount and the current price, and transfers them from your wallet.
 
 This intricate, multi-layered architecture is what allows Uniswap v3 to provide concentrated liquidity in a decentralized and remarkably gas-efficient manner. It turns a conceptually messy problem into a structured series of updates to a few key state variables.
+
+
+
+#### How fees_earning in range is calculated
+
+The State at a Tick
+
+For each initialized tick i, the contract stores a value we'll call feeGrowthOutside(i).
+
+The Rule of Crossing
+
+The magic happens when the current price P_current crosses a tick i. When this happens, the contract updates feeGrowthOutside(i) with this simple but powerful formula:
+
+feeGrowthOutside(i) := feeGrowthGlobal - feeGrowthOutside(i)
+
+Let's see what this formula actually does. It flips the value. It re-calibrates the tick's "outside" value to be equal to whatever was previously considered "inside" that tick.
+
+Walkthrough: The Life of feeGrowthOutside(tick_k)
+
+Let's track feeGrowthOutside for our tick_k as the pool's price moves around. fg is the feeGrowthGlobal counter.
+
+Initial State:
+
+The pool is created. fg = 0.
+
+Someone creates a position that uses tick_k as a boundary.
+
+Let's assume the current price P_current is below tick_k.
+
+By convention, the contract initializes feeGrowthOutside(tick_k) to 0.
+
+Interpretation: At this moment, all fees (fg) have been earned below tick_k. So, the fees earned above tick_k (the "outside" portion) is 0. This makes sense.
+
+Scenario 1: Price rises and crosses tick_k
+
+Just before crossing, P_current is below tick_k.
+
+fg has grown to, say, 10 units.
+
+feeGrowthOutside(tick_k) is still 0.
+
+The price crosses tick_k going UP.
+
+The contract executes the update rule:
+
+new_feeGrowthOutside(tick_k) = fg - old_feeGrowthOutside(tick_k)
+
+new_feeGrowthOutside(tick_k) = 10 - 0 = 10
+
+Now, P_current is above tick_k.
+
+feeGrowthOutside(tick_k) is now 10.
+
+Interpretation: At this moment, all fees earned so far (10 units) happened below tick_k. The feeGrowthOutside(tick_k) now correctly represents the total fees earned on the "other side" (below).
+
+Scenario 2: Price continues to rise, then falls back and crosses tick_k again
+
+While the price was above tick_k, more swaps happened. fg has grown from 10 to 25.
+
+Just before crossing, P_current is above tick_k.
+
+fg = 25.
+
+feeGrowthOutside(tick_k) is 10 (from the last crossing).
+
+The price crosses tick_k going DOWN.
+
+The contract executes the update rule again:
+
+new_feeGrowthOutside(tick_k) = fg - old_feeGrowthOutside(tick_k)
+
+new_feeGrowthOutside(tick_k) = 25 - 10 = 15
+
+Now, P_current is below tick_k again.
+
+feeGrowthOutside(tick_k) is now 15.
+
+Interpretation: Let's check this. A total of 25 units of fees have been earned. The first 10 were earned below the tick. The next 15 were earned above it. Now that the price is back below, the "outside" portion (the part above) is correctly 15. The math works!
+
+How this is Used in Fee Calculation
+
+Now, when you calculate fees for a position from [i_lower, i_upper], the contract does the following:
+
+Get fg: The current global fee growth.
+
+Get fee_lower:
+
+Is P_current >= i_lower?
+
+Yes: fee_lower = feeGrowthOutside(i_lower) (This correctly represents fees below i_lower).
+
+No: fee_lower = fg - feeGrowthOutside(i_lower) (We need to flip it to get the fees below).
+
+Get fee_upper:
+
+Is P_current >= i_upper?
+
+Yes: fee_upper = fg - feeGrowthOutside(i_upper) (We need to flip it to get the fees above).
+
+No: fee_upper = feeGrowthOutside(i_upper) (This correctly represents fees above i_upper).
+
+Calculate fees_inside_range:
+
+fees_inside_range = fg - fee_lower - fee_upper
+
+The paper simplifies this logic in its formulas (e.g., fa(i) and fb(i) in section 6.3), but this is the underlying principle. The feeGrowthOutside value stored at the tick is a "dual-purpose" number whose meaning is interpreted based on the current price's position relative to the tick.
+
+This is a masterpiece of gas-efficient design. With a single storage update upon crossing a tick, the contract maintains all the information needed to calculate fees for any position bordering that tick, from either direction.
