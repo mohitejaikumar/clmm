@@ -1,4 +1,4 @@
-Of course. Let's dive deep into the implementation of a Concentrated Liquidity Market Maker (CLMM) as pioneered by Uniswap v3. This is the engineering behind the magic.
+Let's dive deep into the implementation of a Concentrated Liquidity Market Maker (CLMM) as pioneered by Uniswap v3. This is the engineering behind the magic.
 
 We'll break this down into three core components, following the logic of the paper (Section 6):
 
