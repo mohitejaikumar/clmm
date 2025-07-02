@@ -8,8 +8,8 @@ use anchor_spl::{
 };
 
 use crate::{
-    helpers::{tick::get_tick_at_sqrt_price, token::get_token_vault},
-    state::{AmmConfig, PoolState, SupportMint},
+    helpers::{create_token_vault_account, tick::get_tick_at_sqrt_price, token::get_token_vault},
+    state::{AmmConfig, PoolState, SupportMint, TickArrayBitmapExtension},
 };
 
 #[derive(Accounts)]
@@ -154,7 +154,12 @@ pub fn is_mint_supported(
 }
 
 impl<'info> CreatePool<'info> {
-    pub fn create_pool(&mut self, sqrt_price_x64: u128, open_time: u64) -> Result<()> {
+    pub fn create_pool(
+        &mut self,
+        sqrt_price_x64: u128,
+        open_time: u64,
+        bumps: CreatePoolBumps,
+    ) -> Result<()> {
         // check if mints are initialized
         // if its not initialized, check if it is supported
         let mint0_is_initialized =
@@ -178,11 +183,80 @@ impl<'info> CreatePool<'info> {
         let mut pool_state = self.pool_state.load_init()?;
         let tick = get_tick_at_sqrt_price(sqrt_price_x64)?;
 
-        msg!("tick: {} price: {}", tick , sqrt_price_x64 );
+        msg!("tick: {} price: {}", tick, sqrt_price_x64);
 
-        
+        // init token vault accounts
+        create_token_vault_account(
+            &self.pool_creator,
+            &self.pool_state.to_account_info(),
+            &self.token_vault_0.to_account_info(),
+            &self.token_mint_0,
+            &self.system_program,
+            &self.token_program_0,
+            &[
+                b"vault",
+                self.pool_state.key().as_ref(),
+                self.token_mint_0.key().as_ref(),
+                &[bumps.token_vault_0][..],
+            ],
+        )?;
+        create_token_vault_account(
+            &self.pool_creator,
+            &self.pool_state.to_account_info(),
+            &self.token_vault_1.to_account_info(),
+            &self.token_mint_1,
+            &self.system_program,
+            &self.token_program_1,
+            &[
+                b"vault",
+                self.pool_state.key().as_ref(),
+                self.token_mint_1.key().as_ref(),
+                &[bumps.token_vault_1][..],
+            ],
+        )?;
+        pool_state.amm_config = self.amm_config.key();
+        pool_state.token_mint_0 = self.token_mint_0.key();
+        pool_state.token_mint_1 = self.token_mint_1.key();
+        pool_state.token_vault_0 = self.token_vault_0.key();
+        pool_state.token_vault_1 = self.token_vault_1.key();
+        pool_state.sqrt_price_x64 = sqrt_price_x64;
+        pool_state.tick_current = tick;
+        pool_state.mint_decimals_0 = self.token_mint_0.decimals;
+        pool_state.mint_decimals_1 = self.token_mint_1.decimals;
+        pool_state.tick_spacing = self.amm_config.tick_spacing;
+        pool_state.liquidity = 0;
+        pool_state.fee_growth_global_0_x64 = 0;
+        pool_state.fee_growth_global_1_x64 = 0;
+        pool_state.protocol_fees_token_0 = 0;
+        pool_state.protocol_fees_token_1 = 0;
+        pool_state.swap_in_amount_token_0 = 0;
+        pool_state.swap_in_amount_token_1 = 0;
+        pool_state.swap_out_amount_token_0 = 0;
+        pool_state.swap_out_amount_token_1 = 0;
+        pool_state.owner = self.pool_creator.key();
+        pool_state.bump = [bumps.pool_state];
+        pool_state.open_time = open_time;
+        pool_state.recent_epoch = Clock::get()?.epoch;
+        pool_state.tick_array_bitmap = [0; 16];
+        pool_state.total_fees_token_0 = 0;
+        pool_state.total_fees_claimed_token_0 = 0;
+        pool_state.total_fees_token_1 = 0;
+        pool_state.total_fees_claimed_token_1 = 0;
+        pool_state.fund_fees_token_0 = 0;
+        pool_state.fund_fees_token_1 = 0;
 
+        &self
+            .tick_array_bitmap_extension
+            .load_init()?
+            .initialize(pool_id);
 
+        msg!("pool_state: {:?}", pool_id);
+        msg!(
+            "tick_array_bitmap_extension: {:?}",
+            &self.tick_array_bitmap_extension.key()
+        );
+
+        Ok(())
     }
 }
 
