@@ -9,3 +9,9 @@ pub use support_mint::*;
 
 pub mod tickarray_bitmap_extensions;
 pub use tickarray_bitmap_extensions::*;
+
+pub mod protocol_position;
+pub use protocol_position::*;
+
+pub mod personal_position;
+pub use personal_position::*;
