@@ -6,3 +6,6 @@ pub use create_pool::*;
 
 pub mod open_position_with_token22_nft;
 pub use open_position_with_token22_nft::*;
+
+pub mod increase_liquidity_v2;
+pub use increase_liquidity_v2::*;

@@ -1,7 +1,7 @@
 use std::ops::DerefMut;
 
 use crate::{helpers::{add_liquidity, check_tick_array_start_index, mint_nft_and_remove_mint_authority}, state::{personal_position, PersonalPositionState, PoolState, ProtocolPositionState, TickArrayState}};
-use anchor_lang::{prelude::*, system_program::CreateAccount};
+use anchor_lang::{prelude::*, system_program::{create_account, CreateAccount}};
 use anchor_spl::{
     associated_token::{create, AssociatedToken, Create}, token::initialize_mint2, token_2022::{ spl_token_2022::{self, extension::{metadata_pointer, ExtensionType}, instruction::initialize_mint_close_authority}, Token2022}, token_interface::{Mint, TokenAccount}
 };
@@ -32,7 +32,7 @@ pub struct OpenPositionWithToken22Nft<'info> {
     #[account(
         init_if_needed,
         seeds = [
-            b"position",
+            b"protocol_position",
             pool_state.key().as_ref(),
             &tick_lower_index.to_be_bytes(),
             &tick_upper_index.to_be_bytes()
@@ -45,7 +45,7 @@ pub struct OpenPositionWithToken22Nft<'info> {
 
     #[account(
         init,
-        seeds = [b"position", position_nft_mint.key().as_ref()],
+        seeds = [b"personal_position", position_nft_mint.key().as_ref()],
         bump,
         payer = payer,
         space = 8 + PersonalPositionState::INIT_SPACE
