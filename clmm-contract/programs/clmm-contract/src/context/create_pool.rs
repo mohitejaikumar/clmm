@@ -77,7 +77,7 @@ pub struct CreatePool<'info> {
     #[account(
         init,
         seeds = [
-            b"tick_array",
+            b"tick_array_bitmap",
             pool_state.key().as_ref(),
         ],
         bump,

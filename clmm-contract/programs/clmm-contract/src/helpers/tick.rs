@@ -11,6 +11,8 @@ pub const MAX_TICK: i32 = -MIN_TICK;
 pub const MIN_SQRT_PRICE_X64: u128 = 4295048016;
 pub const MAX_SQRT_PRICE_X64: u128 = 79226673521066979257578248091;
 
+pub const TICK_ARRAY_SIZE: i32 = 60;
+
 const NUM_64: U128 = U128([64, 0]);
 
 // formula: `i = long base(sqrt(1.0001) (sqrt(price))`
@@ -176,8 +178,44 @@ pub fn get_sqrt_price_at_tick(tick: i32) -> Result<u128, Error> {
     Ok(ratio.as_u128())
 }
 
+pub fn get_array_start_index(tick_index: i32, tick_spacing: u16) -> i32 {
+    let ticks_in_array = TICK_ARRAY_SIZE * i32::from(tick_spacing);
+    let mut start = tick_index / ticks_in_array;
+    if tick_index < 0 && tick_index % ticks_in_array != 0 {
+        start = start - 1;
+        // for negative division rust round toward 0
+    }
+    start * ticks_in_array
+}
+
+pub fn check_tick_array_start_index(
+    tick_array_start_index: i32,
+    tick_index: i32,
+    tick_spacing: u16,
+) -> Result<()> {
+    require!(tick_index >= MIN_TICK, ErrorCode::TickLowerOverflow);
+    require!(tick_index <= MAX_TICK, ErrorCode::TickUpperOverflow);
+    require_eq!(tick_index % tick_spacing as i32, 0, ErrorCode::InvalidTick);
+    let correct_start_index = get_array_start_index(tick_index, tick_spacing);
+    require_eq!(
+        tick_array_start_index,
+        correct_start_index,
+        ErrorCode::InvalidTickArrayStartIndex
+    );
+
+    Ok(())
+}
+
 #[error_code]
 enum ErrorCode {
     #[msg("Invalid sqrt price")]
     InvalidSqrtPrice,
+    #[msg("Tick lower overflow")]
+    TickLowerOverflow,
+    #[msg("Tick upper overflow")]
+    TickUpperOverflow,
+    #[msg("Invalid tick")]
+    InvalidTick,
+    #[msg("Invalid tick array start index")]
+    InvalidTickArrayStartIndex,
 }

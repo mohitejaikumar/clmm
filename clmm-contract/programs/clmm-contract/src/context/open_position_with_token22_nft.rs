@@ -1,4 +1,6 @@
-use crate::state::{PersonalPositionState, PoolState, ProtocolPositionState};
+use std::ops::DerefMut;
+
+use crate::{helpers::{add_liquidity, check_tick_array_start_index, mint_nft_and_remove_mint_authority}, state::{personal_position, PersonalPositionState, PoolState, ProtocolPositionState, TickArrayState}};
 use anchor_lang::{prelude::*, system_program::CreateAccount};
 use anchor_spl::{
     associated_token::{create, AssociatedToken, Create}, token::initialize_mint2, token_2022::{ spl_token_2022::{self, extension::{metadata_pointer, ExtensionType}, instruction::initialize_mint_close_authority}, Token2022}, token_interface::{Mint, TokenAccount}
@@ -53,7 +55,7 @@ pub struct OpenPositionWithToken22Nft<'info> {
     #[account(
         mut,
         seeds = [
-            b"tick",
+            b"tick_array",
             pool_state.key().as_ref(),
             &tick_array_lower_start_index.to_be_bytes()
         ],
@@ -64,7 +66,7 @@ pub struct OpenPositionWithToken22Nft<'info> {
     #[account(
         mut,
         seeds = [
-            b"tick",
+            b"tick_array",
             pool_state.key().as_ref(),
             &tick_array_upper_start_index.to_be_bytes()
         ],
@@ -188,8 +190,177 @@ pub fn create_position_nft_mint_with_extensions<'info>(
 
 }
 
+pub fn open_position<'b, 'info>(
+   payer: &'b Signer<'info>,
+   position_nft_owner: &'b UncheckedAccount<'info>,
+   position_nft_mint: &'b AccountInfo<'info>,
+   position_nft_account: &'b AccountInfo<'info>,
+   metadata_account: Option<&'b UncheckedAccount<'info>>,
+   pool_state_loader: &'b AccountLoader<'info, PoolState>,
+   tick_array_lower_loader: &'b UncheckedAccount<'info>,
+   tick_array_upper_loader: &'b UncheckedAccount<'info>,
+   protocol_position: &'b mut Box<Account<'info, ProtocolPositionState>>,
+   personal_position: &'b mut Box<Account<'info, PersonalPositionState>>,
+   token_account_0: &'b AccountInfo<'info>,
+   token_account_1: &'b AccountInfo<'info>,
+   token_vault_0: &'b AccountInfo<'info>,
+   token_vault_1: &'b AccountInfo<'info>,
+   rent: &'b Sysvar<'info, Rent>,
+   system_program: &'b Program<'info, System>,
+   token_program: &'b Program<'info, Token>,
+   _associated_token_program: &'b Program<'info, AssociatedToken>,
+   metadata_program: Option<&'b Program<'info, Metadata>>,
+   token_program_2022: Option<&'b Program<'info, Token2022>>,
+   vault_0_mint: Option<Box<InterfaceAccount<'info, Mint>>>,
+   vault_1_mint: Option<Box<InterfaceAccount<'info, Mint>>>,
+   remaining_accounts: &'b [AccountInfo<'info>],
+   protocol_position_bump: u8,
+   personal_position_bump: u8,
+   liquidity: u128,
+   amount_0_max: u64,
+   amount_1_max: u64,
+   tick_lower_index: i32,
+   tick_upper_index: i32,
+   tick_array_lower_start_index: i32,
+   tick_array_upper_start_index: i32,
+   with_metadata: bool,
+   base_flag: Option<bool>,
+   use_metadata_extension: bool
+) -> Result<()> {
+    let mut liquidity = liquidity;
+
+    {
+        let pool_state = &mut pool_state_loader.load_mut()?;
+        // check ticks order
+        require!(tick_lower_index < tick_upper_index, ErrorCode::InvalidTickOrder);
+        // check tick array start index
+        check_tick_array_start_index(
+            tick_array_lower_start_index,
+            tick_lower_index,
+            pool_state.tick_spacing
+        )?;
+        check_tick_array_start_index(
+            tick_array_upper_start_index,
+            tick_upper_index,
+            pool_state.tick_spacing
+        )?;
+
+        let tick_array_lower_loader = TickArrayState::get_or_create_tick_array(
+            payer.to_account_info(),
+            tick_array_lower_loader.to_account_info(),
+            tick_array_lower_start_index,
+            pool_state.tick_spacing,
+            &pool_state_loader,
+            system_program.to_account_info(),
+        )?;
+
+        let tick_array_upper_loader = 
+        if tick_array_lower_start_index == tick_array_upper_start_index {
+            AccountLoader::<TickArrayState>::try_from(&tick_array_upper_loader.to_account_info())?;
+        } else {
+            TickArrayState::get_or_create_tick_array(
+                payer.to_account_info(),
+                tick_array_upper_loader.to_account_info(),
+                tick_array_upper_start_index,
+                pool_state.tick_spacing,
+                &pool_state_loader,
+                system_program.to_account_info(),
+            )?;
+        };
+
+        // check if protocol position is initialized , protocol initialize also add ticks to tick array
+        let protocol_position = protocol_position.deref_mut();
+        if protocol_position.pool_id == Pubkey::default() {
+            protocol_position.bump = protocol_position_bump;
+            protocol_position.pool_id = pool_state_loader.key();
+            protocol_position.tick_lower_index = tick_lower_index;
+            protocol_position.tick_upper_index = tick_upper_index;
+            
+            tick_array_lower_loader
+                .load_mut()?
+                .get_tick_state_mut(tick_lower_index, pool_state.tick_spacing)?
+                .tick = tick_lower_index;
+
+            tick_array_upper_loader
+                .load_mut()?
+                .get_tick_state_mut(tick_upper_index, pool_state.tick_spacing)?
+                .tick = tick_upper_index;
+        }
+
+        let use_tickarray_bitmap_extension = 
+            pool_state.is_overflow_default_tickarray_bitmap(
+                vec![tick_array_lower_start_index, tick_array_upper_start_index]
+            );
+
+        // Checkpoint: tick_array is loaded, protocol position is initialized, lets now add liquidity
+        let (amount_0, amount_1, amount_0_transfer_fee, amount_1_transfer_fee) = add_liquidity(
+            payer,
+            token_account_0,
+            token_account_1,
+            token_vault_0,
+            token_vault_1,
+            &tick_array_lower_loader,
+            &tick_array_upper_loader,
+            protocol_position,
+            token_program_2022,
+            token_program,
+            vault_0_mint,
+            vault_1_mint,
+            if use_tickarray_bitmap_extension {
+                require_keys_eq!(
+                    remaining_accounts[0].key(),
+                    TickArrayBitmapExtension::key(pool_state_loader.key())
+                );
+                Some(&remaining_accounts[0])
+            } else {
+                None
+            },
+            pool_state,
+            &mut liquidity,
+            amount_0_max,
+            amount_1_max,
+            tick_lower_index,
+            tick_upper_index,
+            base_flag,
+        )?;
+        
+        // initialize personal position
+        personal_position.bump = [personal_position_bump];
+        personal_position.nft_mint = position_nft_mint.key();
+        personal_position.pool_id = pool_state_loader.key();
+        personal_position.tick_lower_index = tick_lower_index;
+        personal_position.tick_upper_index = tick_upper_index;
+        personal_position.fee_growth_inside_0_last_x64 =
+            protocol_position.fee_growth_inside_0_last_x64;
+        personal_position.fee_growth_inside_1_last_x64 =
+            protocol_position.fee_growth_inside_1_last_x64;
+ 
+        personal_position.liquidity = liquidity;
+    }
+
+    mint_nft_and_remove_mint_authority(
+        payer,
+        pool_state_loader,
+        personal_position,
+        position_nft_mint,
+        position_nft_account,
+        metadata_account,
+        metadata_program,
+        token_program,
+        token_program_2022,
+        system_program,
+        rent,
+        with_metadata,
+        use_metadata_extension,
+    )
+
+
+}
+
+
+
 impl<'info> OpenPositionWithToken22Nft<'info> {
-    pub fn open_position(
+    pub fn open_position_with_token22_nft(
         &mut self,
         liquidity: u128,
         amount_0_max: u64,
@@ -230,6 +401,7 @@ impl<'info> OpenPositionWithToken22Nft<'info> {
 
 
         // update the pool state and personal position and protocol position
+        
 
 
     }
@@ -238,5 +410,7 @@ impl<'info> OpenPositionWithToken22Nft<'info> {
 #[error_code]
 pub enum ErrorCode {
     #[msg("Invalid extension type")]
-    InvalidExtensionType
+    InvalidExtensionType,
+    #[msg("Invalid tick order")]
+    InvalidTickOrder
 }
