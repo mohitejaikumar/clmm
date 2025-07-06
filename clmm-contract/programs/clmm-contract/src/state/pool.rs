@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    helpers::{max_tick_in_tickarray_bitmap, MAX_TICK},
+    helpers::{max_tick_in_tickarray_bitmap, MAX_TICK, TICK_ARRAY_BITMAP_SIZE, U1024},
     state::{TickArrayBitmapExtension, TickArrayState},
 };
 
@@ -124,4 +124,30 @@ impl PoolState {
             self.flip_tick_array_bit_internal(tick_array_start_index)
         }
     }
+
+    fn flip_tick_array_bit_internal(&mut self, tick_array_start_index: i32) -> Result<()> {
+        let tick_array_offset_in_bitmap = self.get_tick_array_offset(tick_array_start_index)?;
+
+        let tick_array_bitmap = U1024(self.tick_array_bitmap);
+        let mask = U1024::one() << tick_array_offset_in_bitmap.try_into().unwrap();
+        self.tick_array_bitmap = tick_array_bitmap.bitxor(mask).0;
+        Ok(())
+    }
+
+    pub fn get_tick_array_offset(&self, tick_array_start_index: i32) -> Result<usize> {
+        require!(
+            TickArrayState::check_is_valid_start_index(tick_array_start_index, self.tick_spacing),
+            ErrorCode::InvalidTickIndex
+        );
+        let tick_array_offset_in_bitmap = tick_array_start_index
+            / TickArrayState::tick_count(self.tick_spacing)
+            + TICK_ARRAY_BITMAP_SIZE; // handle negative numbers as well
+        Ok(tick_array_offset_in_bitmap as usize)
+    }
+}
+
+#[error_code]
+pub enum ErrorCode {
+    #[msg("invalid tick index")]
+    InvalidTickIndex,
 }

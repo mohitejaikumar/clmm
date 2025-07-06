@@ -398,12 +398,45 @@ impl<'info> OpenPositionWithToken22Nft<'info> {
             }
         ))?;
 
-
-
-        // update the pool state and personal position and protocol position
         
-
-
+        // update the pool state and personal position and protocol position
+        open_position(
+            &ctx.accounts.payer,
+            &ctx.accounts.position_nft_owner,
+            &ctx.accounts.position_nft_mint,
+            &ctx.accounts.position_nft_account,
+            None,
+            &ctx.accounts.pool_state,
+            &ctx.accounts.tick_array_lower,
+            &ctx.accounts.tick_array_upper,
+            &mut ctx.accounts.protocol_position,
+            &mut ctx.accounts.personal_position,
+            &ctx.accounts.token_account_0.to_account_info(),
+            &ctx.accounts.token_account_1.to_account_info(),
+            &ctx.accounts.token_vault_0.to_account_info(),
+            &ctx.accounts.token_vault_1.to_account_info(),
+            &ctx.accounts.rent,
+            &ctx.accounts.system_program,
+            &ctx.accounts.token_program,
+            &ctx.accounts.associated_token_program,
+            None,
+            Some(&ctx.accounts.token_program_2022),
+            Some(ctx.accounts.vault_0_mint.clone()),
+            Some(ctx.accounts.vault_1_mint.clone()),
+            &ctx.remaining_accounts,
+            ctx.bumps.protocol_position,
+            ctx.bumps.personal_position,
+            liquidity,
+            amount_0_max,
+            amount_1_max,
+            tick_lower_index,
+            tick_upper_index,
+            tick_array_lower_start_index,
+            tick_array_upper_start_index,
+            with_metadata,
+            base_flag,
+            true,
+        )
     }
 }
 
